@@ -7,9 +7,10 @@ Ripple is a column-level SQL lineage and blast-radius analysis engine designed t
 
 ---
 
-## 📊 Empirical Findings (Held-Out Test Benchmark)
+## 📊 Empirical Findings
 
-Evaluated against an 8-pipeline held-out benchmark across varying complexity tiers (Easy, Medium, Hard):
+### 1. Held-Out Generalization Benchmark (8 Pipelines)
+Evaluated against unseen multi-table pipelines across easy, medium, and hard tiers:
 
 | Metric | Column-Level Lineage (Ripple) | Table-Level Baseline | Impact / Difference |
 | :--- | :--- | :--- | :--- |
@@ -18,9 +19,31 @@ Evaluated against an 8-pipeline held-out benchmark across varying complexity tie
 | **Macro-Avg F1 Score** | **1.000** | 0.596 | **+67.8% F1 improvement** |
 | **Blast-Radius Inflation** | **1.00x** | **2.42x** | Table baseline over-flags damage by 242% |
 
-### Key Takeaways:
-1. **False Alarm Elimination**: Over 57% of alerts raised by table-level lineage are false positives, causing unnecessary engineer investigation and alert fatigue.
-2. **Blast-Radius Inflation**: Table-level lineage over-exaggerates blast radius by an average of **2.42x** (peaking at **5.00x** on wide staging tables). Ripple maintains exact **1.00x** inflation.
+### 2. Adversarial Stress Benchmark (4 Edge Cases)
+Genuinely adversarial constructs designed to stress-test AST lineage limitations:
+
+| Query ID | Construct | Column F1 | Table F1 | Failure Mode |
+| :--- | :--- | :--- | :--- | :--- |
+| `adv_01` | `UNION ALL` Set Operation | 0.00 | 0.67 | Synthetic AST token projection on `exp.Union` |
+| `adv_02` | Correlated Scalar Subquery | 0.00 | 0.67 | Correlation filter key dropped from derivation |
+| `adv_03` | Window Function (`ROW_NUMBER`) | 1.00 | 0.67 | Passed (expression tree captures partition keys) |
+| `adv_04` | Recursive Self-Referencing CTE | 0.00 | 0.67 | Recursive union branch pruned to avoid cycles |
+
+---
+
+## 🔬 Adversarial Failure Analysis & Production Fixes
+
+1. **Set Operations (`UNION / UNION ALL`)**:
+   - *Failure:* Calling `.selects` on an `exp.Union` root AST node returns synthetic branch tokens (`UNION`, `1`) rather than the projected column aliases.
+   - *Production Fix:* Detect `exp.Union` nodes, extract projections from `parsed.this.selects`, and trace each union arm independently to the unified destination relation.
+
+2. **Correlated Scalar Subqueries**:
+   - *Failure:* Inner `WHERE` correlation predicates (`WHERE o2.user_id = o1.user_id`) are classified as row filters rather than value derivations, dropping outer key dependencies.
+   - *Production Fix:* Apply AST query decorrelation (rewriting scalar subqueries into equivalent `LEFT JOIN` + `GROUP BY` CTEs) prior to lineage extraction.
+
+3. **Recursive CTEs**:
+   - *Failure:* Lineage extraction parses only the base non-recursive anchor member and prunes the recursive self-referential arm to avoid traversal cycles.
+   - *Production Fix:* Implement a cycle-guarded fixed-point unrolling algorithm to traverse the recursive step up to depth $N$.
 
 ---
 
@@ -60,7 +83,8 @@ ripple/
 ├── data/
 │   ├── schema.yaml            # Data warehouse catalog definitions
 │   ├── dev_queries.yaml       # 10 development benchmark queries
-│   └── test_queries.yaml      # 8 held-out test benchmark queries
+│   ├── test_queries.yaml      # 8 held-out test benchmark queries
+│   └── adversarial_queries.yaml # 4 adversarial stress test queries
 ├── evaluate.py                # Benchmark runner and reporting CLI
 ├── requirements.txt           # Project dependencies
 └── README.md
@@ -85,13 +109,16 @@ pip install -r requirements.txt
 pytest
 ```
 
-### 3. Run Benchmark Evaluation
+### 3. Run Benchmark Evaluations
 ```bash
 # Run on development dataset
 python evaluate.py --dataset data/dev_queries.yaml
 
 # Run on held-out test dataset
 python evaluate.py --dataset data/test_queries.yaml
+
+# Run on adversarial stress dataset
+python evaluate.py --dataset data/adversarial_queries.yaml
 ```
 
 ---

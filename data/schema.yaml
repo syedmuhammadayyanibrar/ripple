@@ -26,3 +26,15 @@ raw_products:
   product_name: string
   category: string
   cost: float
+
+orders_eu:
+  id: int
+  amount: float
+
+orders_us:
+  id: int
+  amount: float
+
+employees:
+  emp_id: int
+  manager_id: int
