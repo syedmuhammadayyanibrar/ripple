@@ -1,0 +1,126 @@
+# ==========================================
+# HELD-OUT TEST BENCHMARK (UNSEEN TEST CASES)
+# ==========================================
+
+- id: "test_01_coalesce_fallback"
+  difficulty: "easy"
+  description: "COALESCE function replacing null discount with zero"
+  queries:
+    - target_table: "stg_orders"
+      sql: "SELECT order_id, amount * (1 - COALESCE(discount, 0.0)) AS net_amount FROM raw_orders"
+  target_change: "table:raw_orders.discount"
+  expected_blast_radius:
+    - "table:stg_orders.net_amount"
+
+- id: "test_02_multi_aggregates_selective"
+  difficulty: "easy"
+  description: "Modifying amount impacts min/max, but should NOT impact user_id or row counts"
+  queries:
+    - target_table: "user_metrics"
+      sql: |
+        SELECT 
+          user_id, 
+          min(amount) AS min_amt, 
+          max(amount) AS max_amt, 
+          count(order_id) AS order_count 
+        FROM raw_orders 
+        GROUP BY user_id
+  target_change: "table:raw_orders.amount"
+  expected_blast_radius:
+    - "table:user_metrics.min_amt"
+    - "table:user_metrics.max_amt"
+
+- id: "test_03_three_table_join"
+  difficulty: "medium"
+  description: "Orders joined with Items and Products to compute profit"
+  queries:
+    - target_table: "order_profitability"
+      sql: |
+        SELECT 
+          oi.order_id,
+          oi.quantity * (oi.unit_price - p.cost) AS item_profit
+        FROM raw_order_items AS oi
+        JOIN raw_products AS p ON oi.product_id = p.product_id
+        JOIN raw_orders AS o ON oi.order_id = o.order_id
+  target_change: "table:raw_products.cost"
+  expected_blast_radius:
+    - "table:order_profitability.item_profit"
+
+- id: "test_04_three_step_chained_ctes"
+  difficulty: "medium"
+  description: "Three sequential CTEs passing calculations down the line"
+  queries:
+    - target_table: "annual_tax_report"
+      sql: |
+        WITH step1 AS (
+          SELECT order_id, amount * tax_rate AS tax_amount FROM raw_orders
+        ),
+        step2 AS (
+          SELECT order_id, tax_amount, round(tax_amount, 2) AS rounded_tax FROM step1
+        ),
+        step3 AS (
+          SELECT order_id, rounded_tax * 1.01 AS audited_tax FROM step2
+        )
+        SELECT order_id, audited_tax FROM step3
+  target_change: "table:raw_orders.tax_rate"
+  expected_blast_radius:
+    - "table:annual_tax_report.audited_tax"
+
+- id: "test_05_wildcard_plus_expression"
+  difficulty: "medium"
+  description: "Star expansion alongside an explicit calculated column"
+  queries:
+    - target_table: "enriched_users"
+      sql: "SELECT *, upper(country) AS upper_country FROM raw_users"
+  target_change: "table:raw_users.country"
+  expected_blast_radius:
+    - "table:enriched_users.country"
+    - "table:enriched_users.upper_country"
+
+- id: "test_06_unrelated_column_isolation"
+  difficulty: "medium"
+  description: "Changing product_name in products table should NOT affect item_profit"
+  queries:
+    - target_table: "order_profitability"
+      sql: |
+        SELECT 
+          oi.order_id,
+          p.product_name,
+          oi.quantity * (oi.unit_price - p.cost) AS item_profit
+        FROM raw_order_items AS oi
+        JOIN raw_products AS p ON oi.product_id = p.product_id
+  target_change: "table:raw_products.product_name"
+  expected_blast_radius:
+    - "table:order_profitability.product_name"
+
+- id: "test_07_three_stage_warehouse_pipeline"
+  difficulty: "hard"
+  description: "Raw -> Staging -> Intermediate -> Marts 3-query pipeline"
+  queries:
+    - target_table: "stg_orders"
+      sql: "SELECT order_id, user_id, amount, discount FROM raw_orders"
+    - target_table: "int_orders"
+      sql: "SELECT order_id, user_id, amount * (1 - discount) AS net_amount FROM stg_orders"
+    - target_table: "fct_customer_spend"
+      sql: "SELECT user_id, sum(net_amount) AS ltv FROM int_orders GROUP BY user_id"
+  target_change: "table:raw_orders.discount"
+  expected_blast_radius:
+    - "table:stg_orders.discount"
+    - "table:int_orders.net_amount"
+    - "table:fct_customer_spend.ltv"
+
+- id: "test_08_branching_fanout_pipeline"
+  difficulty: "hard"
+  description: "Query 1 feeds into BOTH Finance Report and Marketing Report"
+  queries:
+    - target_table: "stg_orders"
+      sql: "SELECT order_id, user_id, amount * (1 - discount) AS net_amount, status FROM raw_orders"
+    - target_table: "rpt_finance"
+      sql: "SELECT sum(net_amount) AS total_revenue FROM stg_orders"
+    - target_table: "rpt_marketing"
+      sql: "SELECT user_id, sum(net_amount) AS user_acquisition_value FROM stg_orders GROUP BY user_id"
+  target_change: "table:raw_orders.discount"
+  expected_blast_radius:
+    - "table:stg_orders.net_amount"
+    - "table:rpt_finance.total_revenue"
+    - "table:rpt_marketing.user_acquisition_value"

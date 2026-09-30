@@ -1,0 +1,136 @@
+# EASY QUERIES (Single query, simple flow)
+
+- id: "dev_01_simple_math"
+  difficulty: "easy"
+  description: "Net price calculation using price and discount"
+  queries:
+    - target_table: "stg_orders"
+      sql: "SELECT order_id, amount * (1 - discount) AS net_amount, status FROM raw_orders"
+  target_change: "table:raw_orders.discount"
+  expected_blast_radius:
+    - "table:stg_orders.net_amount"
+
+- id: "dev_02_column_alias"
+  difficulty: "easy"
+  description: "Renaming user_id to customer_id"
+  queries:
+    - target_table: "stg_customers"
+      sql: "SELECT id AS customer_id, name, country FROM raw_users"
+  target_change: "table:raw_users.id"
+  expected_blast_radius:
+    - "table:stg_customers.customer_id"
+
+- id: "dev_03_aggregation_sum"
+  difficulty: "easy"
+  description: "Aggregating amount by user"
+  queries:
+    - target_table: "user_spending"
+      sql: "SELECT user_id, sum(amount) AS total_spent FROM raw_orders GROUP BY user_id"
+  target_change: "table:raw_orders.amount"
+  expected_blast_radius:
+    - "table:user_spending.total_spent"
+
+- id: "dev_04_untouched_column"
+  difficulty: "easy"
+  description: "Changing status should not affect financial totals"
+  queries:
+    - target_table: "stg_orders"
+      sql: "SELECT order_id, amount * (1 - discount) AS net_amount, status FROM raw_orders"
+  target_change: "table:raw_orders.status"
+  expected_blast_radius:
+    - "table:stg_orders.status"
+
+
+# MEDIUM QUERIES (Joins, CTEs, Wildcards, CASE)
+
+- id: "dev_05_two_table_join"
+  difficulty: "medium"
+  description: "Join orders with users to enrich customer country"
+  queries:
+    - target_table: "orders_enriched"
+      sql: |
+        SELECT 
+          o.order_id,
+          o.amount,
+          u.country AS customer_country
+        FROM raw_orders AS o
+        JOIN raw_users AS u ON o.user_id = u.id
+  target_change: "table:raw_users.country"
+  expected_blast_radius:
+    - "table:orders_enriched.customer_country"
+
+- id: "dev_06_single_cte"
+  difficulty: "medium"
+  description: "CTE computing margin before final select"
+  queries:
+    - target_table: "fct_order_items"
+      sql: |
+        WITH base AS (
+          SELECT item_id, quantity * unit_price AS line_total FROM raw_order_items
+        )
+        SELECT item_id, line_total * 0.9 AS discounted_total FROM base
+  target_change: "table:raw_order_items.unit_price"
+  expected_blast_radius:
+    - "table:fct_order_items.discounted_total"
+
+- id: "dev_07_case_when"
+  difficulty: "medium"
+  description: "CASE statement deriving customer tier"
+  queries:
+    - target_table: "customer_tiers"
+      sql: |
+        SELECT 
+          order_id,
+          CASE WHEN amount > 1000 THEN 'VIP' ELSE 'Standard' END AS tier
+        FROM raw_orders
+  target_change: "table:raw_orders.amount"
+  expected_blast_radius:
+    - "table:customer_tiers.tier"
+
+- id: "dev_08_wildcard_expansion"
+  difficulty: "medium"
+  description: "Staging table dumping all columns via star"
+  queries:
+    - target_table: "stg_users"
+      sql: "SELECT * FROM raw_users"
+  target_change: "table:raw_users.email"
+  expected_blast_radius:
+    - "table:stg_users.email"
+
+
+# HARD QUERIES (Multi-step pipelines & multi-CTEs)
+
+- id: "dev_09_multi_step_pipeline"
+  difficulty: "hard"
+  description: "Raw -> Staging -> Marts 2-query pipeline"
+  queries:
+    - target_table: "stg_orders"
+      sql: "SELECT order_id, user_id, amount * (1 - discount) AS net_amount FROM raw_orders"
+    - target_table: "fct_daily_revenue"
+      sql: "SELECT user_id, sum(net_amount) AS revenue FROM stg_orders GROUP BY user_id"
+  target_change: "table:raw_orders.discount"
+  expected_blast_radius:
+    - "table:stg_orders.net_amount"
+    - "table:fct_daily_revenue.revenue"
+
+- id: "dev_10_chained_ctes_multi_source"
+  difficulty: "hard"
+  description: "Two CTEs joined together before final output"
+  queries:
+    - target_table: "customer_order_summary"
+      sql: |
+        WITH orders_summary AS (
+          SELECT user_id, count(order_id) AS order_count FROM raw_orders GROUP BY user_id
+        ),
+        user_info AS (
+          SELECT id, name, country FROM raw_users
+        )
+        SELECT 
+          u.name,
+          u.country,
+          o.order_count
+        FROM user_info AS u
+        JOIN orders_summary AS o ON u.id = o.user_id
+  target_change: "table:raw_orders.order_id"
+  expected_blast_radius:
+    - "table:customer_order_summary.order_count"

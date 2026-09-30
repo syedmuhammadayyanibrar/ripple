@@ -1,0 +1,28 @@
+raw_users:
+  id: int
+  name: string
+  email: string
+  country: string
+  signup_date: date
+
+raw_orders:
+  order_id: int
+  user_id: int
+  amount: float
+  discount: float
+  tax_rate: float
+  status: string
+  created_at: timestamp
+
+raw_order_items:
+  item_id: int
+  order_id: int
+  product_id: int
+  quantity: int
+  unit_price: float
+
+raw_products:
+  product_id: int
+  product_name: string
+  category: string
+  cost: float
