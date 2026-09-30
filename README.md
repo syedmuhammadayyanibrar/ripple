@@ -1,16 +1,17 @@
-# Ripple: SQL Column-Level Lineage & Blast-Radius Engine
+# Ripple: SQL Column-Level Lineage & Autonomous Agent Loop
 
-Ripple is a column-level SQL lineage and blast-radius analysis engine designed to quantify the downstream impact of data-model changes across multi-table analytical pipelines.
+Ripple is a column-level SQL lineage engine and autonomous agent verification platform designed to evaluate and prevent breaking data-model changes across multi-table analytical pipelines.
 
-## 🎯 Research Question
-> **How accurately can column-level lineage predict the true downstream blast radius of a data-model change, and how does it compare with table-level lineage?**
+## 🎯 Research Questions
+1. **Core Lineage**: How accurately can column-level lineage predict the true downstream blast radius of a data-model change compared to coarse table-level baselines?
+2. **Autonomous Agent Trust**: When an autonomous agent proposes a data-model change, how often does its self-reported impact assessment match the true blast radius — and does its reliability degrade when the underlying lineage engine fails on complex SQL constructs?
 
 ---
 
 ## 📊 Empirical Findings
 
-### 1. Held-Out Generalization Benchmark (8 Pipelines)
-Evaluated against unseen multi-table pipelines across easy, medium, and hard tiers:
+### 1. Lineage Engine Benchmark (Generalization Set: 8 Pipelines)
+Evaluated across easy, medium, and hard multi-table analytical pipelines:
 
 | Metric | Column-Level Lineage (Ripple) | Table-Level Baseline | Impact / Difference |
 | :--- | :--- | :--- | :--- |
@@ -19,50 +20,60 @@ Evaluated against unseen multi-table pipelines across easy, medium, and hard tie
 | **Macro-Avg F1 Score** | **1.000** | 0.596 | **+67.8% F1 improvement** |
 | **Blast-Radius Inflation** | **1.00x** | **2.42x** | Table baseline over-flags damage by 242% |
 
-### 2. Adversarial Stress Benchmark (4 Edge Cases)
-Genuinely adversarial constructs designed to stress-test AST lineage limitations:
+### 2. Autonomous Agent Reliability Benchmark (8 Change Requests)
+Evaluated across both standard and adversarial SQL pipelines to measure agent trust:
 
-| Query ID | Construct | Column F1 | Table F1 | Failure Mode |
-| :--- | :--- | :--- | :--- | :--- |
-| `adv_01` | `UNION ALL` Set Operation | 0.00 | 0.67 | Synthetic AST token projection on `exp.Union` |
-| `adv_02` | Correlated Scalar Subquery | 0.00 | 0.67 | Correlation filter key dropped from derivation |
-| `adv_03` | Window Function (`ROW_NUMBER`) | 1.00 | 0.67 | Passed (expression tree captures partition keys) |
-| `adv_04` | Recursive Self-Referencing CTE | 0.00 | 0.67 | Recursive union branch pruned to avoid cycles |
+| Metric | Standard SQL | Adversarial SQL | Overall |
+| :--- | :--- | :--- | :--- |
+| **Blast Radius Match Rate** | **100.0%** | 25.0% | **62.5%** |
+| **False Confidence Failure Rate** | **0.0%** | **50.0%** | **25.0%** |
 
----
-
-## 🔬 Adversarial Failure Analysis & Production Fixes
-
-1. **Set Operations (`UNION / UNION ALL`)**:
-   - *Failure:* Calling `.selects` on an `exp.Union` root AST node returns synthetic branch tokens (`UNION`, `1`) rather than the projected column aliases.
-   - *Production Fix:* Detect `exp.Union` nodes, extract projections from `parsed.this.selects`, and trace each union arm independently to the unified destination relation.
-
-2. **Correlated Scalar Subqueries**:
-   - *Failure:* Inner `WHERE` correlation predicates (`WHERE o2.user_id = o1.user_id`) are classified as row filters rather than value derivations, dropping outer key dependencies.
-   - *Production Fix:* Apply AST query decorrelation (rewriting scalar subqueries into equivalent `LEFT JOIN` + `GROUP BY` CTEs) prior to lineage extraction.
-
-3. **Recursive CTEs**:
-   - *Failure:* Lineage extraction parses only the base non-recursive anchor member and prunes the recursive self-referential arm to avoid traversal cycles.
-   - *Production Fix:* Implement a cycle-guarded fixed-point unrolling algorithm to traverse the recursive step up to depth $N$.
+### Key Discovery: The Silent Lineage Failure Trap
+When underlying lineage fails silently on complex constructs (e.g., recursive CTEs or set operations), downstream deterministic checks receive an empty blast radius. As a result, the autonomous agent falsely reports `LOW RISK` and issues a `PROCEED` recommendation on breaking schema migrations. This reveals that agent guardrails must actively flag dialect unparseability rather than assuming empty blast radius equals safety.
 
 ---
 
 ## 🏗️ Architecture & Core Components
 
-Ripple separates query dependencies into two orthogonal graphs:
+Ripple operates as an end-to-end agentic platform:
 
-1. **Derivation Lineage Graph ($G_{val}$)**:
-   - Tracks data flow: which source column values are transformed and poured into destination column values (`SELECT a + 1 AS b`).
-   - Uses `sqlglot` AST parsing, resolves table aliases (`FROM users AS u -> raw_users`), and isolates CTE namespaces (`cte:target.base.col`) to prevent cross-query collisions.
-   - Leverages schema catalog qualification to expand wildcards (`SELECT *`).
+```
+ Natural Language Request
+           │
+           ▼
+┌─────────────────────────┐
+│   Propose-Change Agent  │  <── Schema Catalog Grounding
+└──────────┬──────────────┘
+           │ Structured ChangeProposal
+           ▼
+┌─────────────────────────┐
+│  Ripple Lineage Engine  │  ──> Column-Level & Relational Graphs
+└──────────┬──────────────┘
+           │ Blast Radiuses
+           ▼
+┌─────────────────────────┐
+│  Deterministic Verifier │  <── Rule-based checks (Type cast, Drop, Rename)
+└──────────┬──────────────┘
+           │ Verification Results
+           ▼
+┌─────────────────────────┐
+│   Impact Report Agent   │  ──> Audited ImpactReport (Risk & Recommendation)
+└─────────────────────────┘
+```
 
-2. **Relational-Influence Graph ($G_{rel}$)**:
-   - Tracks control flow: which columns govern row survivability, join cardinality, or aggregation bucketing (`WHERE`, `JOIN ... ON`, `GROUP BY`, `HAVING`).
-   - Isolates predicate dependencies from column calculation values, preventing artificial blast-radius inflation while ensuring pipeline governance.
+1. **Structured Change Proposal (`src/agent.py`)**:
+   - Converts natural language requests into typed `ChangeProposal` objects with schema catalog grounding.
+   - Enforces structured JSON output (`response_schema`).
 
-3. **Evaluation Harness (`src/metrics.py`, `evaluate.py`)**:
-   - Computes Precision, Recall, F1, and Blast-Radius Inflation across human-verified ground-truth pipelines.
-   - Compares Ripple directly against a table-level baseline (`src/table_baseline.py`).
+2. **Deterministic Verification Layer (`src/verifier.py`)**:
+   - Hardcoded rule checks independent of LLM reasoning:
+     - `DESTRUCTIVE_DROP_CHECK`: Blocks dropping columns with downstream dependencies.
+     - `RENAME_PROPAGATION_CHECK`: Identifies unmigrated downstream references.
+     - `TYPE_COMPATIBILITY_CHECK`: Prevents invalid numeric-to-string conversions impacting downstream arithmetic.
+     - `RELATIONAL_CONTROL_SHIFT`: Surfaces predicate, join, and group-by shifts.
+
+3. **Autonomous Agent Loop (`src/agent_loop.py`)**:
+   - Orchestrates LLM proposal generation, Ripple lineage computation, deterministic verification, and impact reporting.
 
 ---
 
@@ -72,20 +83,27 @@ Ripple separates query dependencies into two orthogonal graphs:
 ripple/
 ├── src/
 │   ├── __init__.py
+│   ├── agent.py               # Propose-change and impact-report generation
+│   ├── agent_loop.py          # End-to-end autonomous agent loop orchestrator
 │   ├── lineage_engine.py      # Column-level derivation & relational-influence engine
 │   ├── table_baseline.py      # Coarse table-level lineage baseline
+│   ├── verifier.py            # Deterministic rule-based verification engine
 │   └── metrics.py             # Precision, Recall, F1, Inflation calculator
 ├── tests/
 │   ├── __init__.py
-│   ├── test_lineage_engine.py # Unit tests for derivation, CTEs, wildcards, joins, relational influence
+│   ├── test_agent.py          # End-to-end agent loop tests
+│   ├── test_lineage_engine.py # Unit tests for lineage engine
 │   ├── test_metrics.py        # Unit tests for scoring logic
-│   └── test_table_baseline.py # Unit tests for table baseline
+│   ├── test_table_baseline.py # Unit tests for table baseline
+│   └── test_verifier.py       # Unit tests for deterministic checks
 ├── data/
 │   ├── schema.yaml            # Data warehouse catalog definitions
 │   ├── dev_queries.yaml       # 10 development benchmark queries
 │   ├── test_queries.yaml      # 8 held-out test benchmark queries
-│   └── adversarial_queries.yaml # 4 adversarial stress test queries
-├── evaluate.py                # Benchmark runner and reporting CLI
+│   ├── adversarial_queries.yaml # 4 adversarial stress test queries
+│   └── agent_eval_cases.yaml  # 8 autonomous agent evaluation scenarios
+├── evaluate.py                # Lineage engine benchmark runner
+├── evaluate_agent.py          # Autonomous agent reliability benchmark runner
 ├── requirements.txt           # Project dependencies
 └── README.md
 ```
@@ -104,48 +122,17 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Run Test Suite
+### 2. Run Test Suite (15 Passing Tests)
 ```bash
 pytest
 ```
 
-### 3. Run Benchmark Evaluations
+### 3. Run Benchmarks
 ```bash
-# Run on development dataset
-python evaluate.py --dataset data/dev_queries.yaml
-
-# Run on held-out test dataset
+# Run core lineage engine benchmarks
 python evaluate.py --dataset data/test_queries.yaml
-
-# Run on adversarial stress dataset
 python evaluate.py --dataset data/adversarial_queries.yaml
-```
 
----
-
-## 💻 Programmatic Usage
-
-```python
-from src.lineage_engine import LineageEngine
-
-schema = {
-    "raw_orders": {"order_id": "int", "price": "float", "discount": "float", "status": "string"},
-    "stg_orders": {"order_id": "int", "net_price": "float"}
-}
-
-engine = LineageEngine(schema=schema)
-
-# 1. Add pipeline queries
-engine.add_query(
-    sql="SELECT order_id, price * (1 - discount) AS net_price FROM raw_orders WHERE status = 'active'",
-    target_table="stg_orders"
-)
-
-# 2. Query Derivation Blast Radius (Value changes)
-deriv_blast = engine.get_derivation_blast_radius("table:raw_orders.discount")
-# -> {'table:stg_orders.net_price'}
-
-# 3. Query Relational Influence Blast Radius (Row membership changes)
-rel_blast = engine.get_relational_blast_radius("table:raw_orders.status")
-# -> {'relation:stg_orders'}
+# Run autonomous agent reliability benchmark
+python evaluate_agent.py
 ```

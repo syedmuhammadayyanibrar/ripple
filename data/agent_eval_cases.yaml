@@ -1,0 +1,88 @@
+- id: "agent_01_safe_drop_unused"
+  category: "standard"
+  user_request: "Remove the email column from raw_users for privacy compliance."
+  pipeline_queries:
+    - target_table: "stg_orders"
+      sql: "SELECT order_id, amount * (1 - discount) AS net_price FROM raw_orders"
+  true_blast_radius: []
+  expected_verdict: "SAFE"
+
+- id: "agent_02_breaking_rename"
+  category: "standard"
+  user_request: "Rename discount to discount_pct in raw_orders."
+  pipeline_queries:
+    - target_table: "stg_orders"
+      sql: "SELECT order_id, amount * (1 - discount) AS net_price FROM raw_orders"
+    - target_table: "fct_orders"
+      sql: "SELECT order_id, net_price * 1.05 AS final_price FROM stg_orders"
+  true_blast_radius:
+    - "table:stg_orders.net_price"
+    - "table:fct_orders.final_price"
+  expected_verdict: "BREAKING"
+
+- id: "agent_03_breaking_type_cast"
+  category: "standard"
+  user_request: "Convert the amount column in raw_orders from float to string representation."
+  pipeline_queries:
+    - target_table: "stg_orders"
+      sql: "SELECT order_id, sum(amount) AS total_revenue FROM raw_orders GROUP BY order_id"
+  true_blast_radius:
+    - "table:stg_orders.total_revenue"
+  expected_verdict: "BREAKING"
+
+- id: "agent_04_status_relational_shift"
+  category: "standard"
+  user_request: "Modify the status column in raw_orders to normalize casing."
+  pipeline_queries:
+    - target_table: "clean_orders"
+      sql: "SELECT order_id, amount FROM raw_orders WHERE status = 'completed'"
+  true_blast_radius: []
+  true_relational_relations:
+    - "relation:clean_orders"
+  expected_verdict: "RELATIONAL_WARNING"
+
+- id: "agent_05_adv_union_all_breakage"
+  category: "adversarial"
+  user_request: "Rename amount in orders_eu to euro_amount."
+  pipeline_queries:
+    - target_table: "all_orders"
+      sql: "SELECT id, amount FROM orders_eu UNION ALL SELECT id, amount FROM orders_us"
+  true_blast_radius:
+    - "table:all_orders.amount"
+  expected_verdict: "BREAKING"
+
+- id: "agent_06_adv_recursive_cte_breakage"
+  category: "adversarial"
+  user_request: "Rename manager_id in employees to supervisor_id."
+  pipeline_queries:
+    - target_table: "final_org"
+      sql: |
+        WITH RECURSIVE org_chart AS (
+          SELECT emp_id, manager_id, 1 AS depth FROM employees WHERE manager_id IS NULL
+          UNION ALL
+          SELECT e.emp_id, e.manager_id, o.depth + 1 FROM employees e JOIN org_chart o ON e.manager_id = o.emp_id
+        )
+        SELECT emp_id, depth FROM org_chart
+  true_blast_radius:
+    - "table:final_org.depth"
+  expected_verdict: "BREAKING"
+
+- id: "agent_07_adv_correlated_subquery_breakage"
+  category: "adversarial"
+  user_request: "Rename amount in raw_orders to order_amount."
+  pipeline_queries:
+    - target_table: "orders_with_max"
+      sql: "SELECT o1.order_id, (SELECT max(o2.amount) FROM raw_orders o2 WHERE o2.user_id = o1.user_id) AS max_user_order FROM raw_orders o1"
+  true_blast_radius:
+    - "table:orders_with_max.max_user_order"
+  expected_verdict: "BREAKING"
+
+- id: "agent_08_adv_window_function"
+  category: "adversarial"
+  user_request: "Rename amount in raw_orders to order_amount."
+  pipeline_queries:
+    - target_table: "ranked_orders"
+      sql: "SELECT order_id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rank FROM raw_orders"
+  true_blast_radius:
+    - "table:ranked_orders.rank"
+  expected_verdict: "BREAKING"
