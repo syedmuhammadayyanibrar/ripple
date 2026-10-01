@@ -87,3 +87,20 @@ def test_relational_influence_vs_derivation():
 
     rel_blast = engine.get_relational_blast_radius("table:orders.is_refunded")
     assert "relation:clean_orders" in rel_blast
+
+
+def test_unresolved_construct_detection_modes():
+    sql_lateral = "SELECT u.id, l.score FROM users u, LATERAL (SELECT score FROM scores s WHERE s.uid = u.id) l"
+    
+    eng_none = LineageEngine(sniffer_mode="none")
+    eng_none.add_query(sql_lateral, "summary")
+    assert eng_none.unresolved_constructs == {}
+
+    eng_targeted = LineageEngine(sniffer_mode="targeted")
+    eng_targeted.add_query(sql_lateral, "summary")
+    assert eng_targeted.unresolved_constructs == {}
+
+    eng_extended = LineageEngine(sniffer_mode="extended")
+    eng_extended.add_query(sql_lateral, "summary")
+    assert "summary" in eng_extended.unresolved_constructs
+    assert "LATERAL_SUBQUERY" in eng_extended.unresolved_constructs["summary"]

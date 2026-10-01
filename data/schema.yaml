@@ -38,3 +38,20 @@ orders_us:
 employees:
   emp_id: int
   manager_id: int
+
+user_scores:
+  user_id: int
+  score: float
+
+discounts:
+  order_id: int
+  discount_amount: float
+
+user_logins:
+  user_id: int
+  login_time: timestamp
+
+inventory:
+  product_id: int
+  warehouse_id: int
+  stock_count: int

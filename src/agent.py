@@ -147,6 +147,96 @@ def _mock_propose_change(user_request: str, schema_yaml: str) -> ChangeProposal:
             sql_statement="ALTER TABLE raw_users DROP COLUMN email;",
             intent_summary="Remove customer email field per privacy compliance."
         )
+    elif "country" in req_lower:
+        return ChangeProposal(
+            target_table="raw_users",
+            target_column="country",
+            change_type=ChangeType.RENAME,
+            old_value="country",
+            new_value="user_country",
+            sql_statement="ALTER TABLE raw_users RENAME COLUMN country TO user_country;",
+            intent_summary="Rename country to user_country."
+        )
+    elif "unit_price" in req_lower:
+        return ChangeProposal(
+            target_table="raw_order_items",
+            target_column="unit_price",
+            change_type=ChangeType.RENAME,
+            old_value="unit_price",
+            new_value="price_per_unit",
+            sql_statement="ALTER TABLE raw_order_items RENAME COLUMN unit_price TO price_per_unit;",
+            intent_summary="Standardize unit_price naming."
+        )
+    elif "stock_count" in req_lower:
+        return ChangeProposal(
+            target_table="inventory",
+            target_column="stock_count",
+            change_type=ChangeType.RENAME,
+            old_value="stock_count",
+            new_value="quantity_on_hand",
+            sql_statement="ALTER TABLE inventory RENAME COLUMN stock_count TO quantity_on_hand;",
+            intent_summary="Rename stock_count to quantity_on_hand."
+        )
+    elif "quantity" in req_lower and ("widen" in req_lower or "smallint" in req_lower or "bigint" in req_lower or "order_items" in req_lower):
+        return ChangeProposal(
+            target_table="raw_order_items",
+            target_column="quantity",
+            change_type=ChangeType.ALTER_TYPE,
+            old_value="smallint",
+            new_value="bigint",
+            sql_statement="ALTER TABLE raw_order_items ALTER COLUMN quantity TYPE BIGINT;",
+            intent_summary="Widen quantity integer storage."
+        )
+    elif "tax_rate" in req_lower:
+        return ChangeProposal(
+            target_table="raw_orders",
+            target_column="tax_rate",
+            change_type=ChangeType.DROP,
+            old_value="float",
+            new_value=None,
+            sql_statement="ALTER TABLE raw_orders DROP COLUMN tax_rate;",
+            intent_summary="Remove tax_rate from raw_orders."
+        )
+    elif "discount_amount" in req_lower or "rebate_amount" in req_lower:
+        return ChangeProposal(
+            target_table="discounts",
+            target_column="discount_amount",
+            change_type=ChangeType.RENAME,
+            old_value="discount_amount",
+            new_value="rebate_amount",
+            sql_statement="ALTER TABLE discounts RENAME COLUMN discount_amount TO rebate_amount;",
+            intent_summary="Rename discount_amount to rebate_amount."
+        )
+    elif "score" in req_lower:
+        return ChangeProposal(
+            target_table="user_scores",
+            target_column="score",
+            change_type=ChangeType.RENAME,
+            old_value="score",
+            new_value="performance_score",
+            sql_statement="ALTER TABLE user_scores RENAME COLUMN score TO performance_score;",
+            intent_summary="Rename score to performance_score."
+        )
+    elif "account_id" in req_lower or ("user_id" in req_lower and "user_logins" in req_lower):
+        return ChangeProposal(
+            target_table="user_logins",
+            target_column="user_id",
+            change_type=ChangeType.RENAME,
+            old_value="user_id",
+            new_value="account_id",
+            sql_statement="ALTER TABLE user_logins RENAME COLUMN user_id TO account_id;",
+            intent_summary="Rename user_id in user_logins."
+        )
+    elif "stock_count" in req_lower:
+        return ChangeProposal(
+            target_table="inventory",
+            target_column="stock_count",
+            change_type=ChangeType.RENAME,
+            old_value="stock_count",
+            new_value="quantity_on_hand",
+            sql_statement="ALTER TABLE inventory RENAME COLUMN stock_count TO quantity_on_hand;",
+            intent_summary="Rename stock_count to quantity_on_hand."
+        )
     elif "discount" in req_lower and ("rename" in req_lower or "discount_pct" in req_lower or "percentage" in req_lower):
         return ChangeProposal(
             target_table="raw_orders",
@@ -187,7 +277,17 @@ def _mock_propose_change(user_request: str, schema_yaml: str) -> ChangeProposal:
             sql_statement="ALTER TABLE orders_eu RENAME COLUMN amount TO euro_amount;",
             intent_summary="Rename amount to euro_amount."
         )
-    elif "amount" in req_lower:
+    elif "order_amount" in req_lower:
+        return ChangeProposal(
+            target_table="raw_orders",
+            target_column="amount",
+            change_type=ChangeType.RENAME,
+            old_value="amount",
+            new_value="order_amount",
+            sql_statement="ALTER TABLE raw_orders RENAME COLUMN amount TO order_amount;",
+            intent_summary="Rename amount to order_amount."
+        )
+    elif "amount" in req_lower and ("float" in req_lower or "string" in req_lower or "convert" in req_lower):
         return ChangeProposal(
             target_table="raw_orders",
             target_column="amount",
@@ -217,6 +317,7 @@ def _mock_propose_change(user_request: str, schema_yaml: str) -> ChangeProposal:
             sql_statement="ALTER TABLE raw_orders RENAME COLUMN amount TO total_amount;",
             intent_summary="Standardizing column naming."
         )
+
 
 
 def _mock_generate_impact_report(

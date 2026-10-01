@@ -86,3 +86,86 @@
   true_blast_radius:
     - "table:ranked_orders.rank"
   expected_verdict: "BREAKING"
+
+- id: "agent_09_safe_rename_unreferenced"
+  category: "standard"
+  user_request: "Rename country to user_country in raw_users."
+  pipeline_queries:
+    - target_table: "stg_orders"
+      sql: "SELECT order_id, amount FROM raw_orders"
+  true_blast_radius: []
+  expected_verdict: "SAFE"
+
+- id: "agent_10_multi_hop_join_breakage"
+  category: "standard"
+  user_request: "Rename unit_price to price_per_unit in raw_order_items."
+  pipeline_queries:
+    - target_table: "item_revenues"
+      sql: "SELECT item_id, order_id, quantity * unit_price AS item_total FROM raw_order_items"
+    - target_table: "order_aggregates"
+      sql: "SELECT order_id, sum(item_total) AS order_sum FROM item_revenues GROUP BY order_id"
+  true_blast_radius:
+    - "table:item_revenues.item_total"
+    - "table:order_aggregates.order_sum"
+  expected_verdict: "BREAKING"
+
+- id: "agent_11_safe_type_widening"
+  category: "standard"
+  user_request: "Widen quantity column in raw_order_items from smallint to bigint."
+  pipeline_queries:
+    - target_table: "stg_items"
+      sql: "SELECT item_id, quantity FROM raw_order_items"
+  true_blast_radius:
+    - "table:stg_items.quantity"
+  expected_verdict: "SAFE"
+
+- id: "agent_12_drop_with_cte_pipeline"
+  category: "standard"
+  user_request: "Remove tax_rate from raw_orders."
+  pipeline_queries:
+    - target_table: "tax_summary"
+      sql: "WITH order_taxes AS (SELECT order_id, amount * tax_rate AS tax_amount FROM raw_orders) SELECT order_id, tax_amount FROM order_taxes"
+  true_blast_radius:
+    - "table:tax_summary.tax_amount"
+  expected_verdict: "BREAKING"
+
+- id: "agent_13_adv_lateral_subquery"
+  category: "adversarial"
+  user_request: "Rename score to performance_score in user_scores."
+  pipeline_queries:
+    - target_table: "user_summary"
+      sql: "SELECT u.id, l.recent_score FROM raw_users u, LATERAL (SELECT score AS recent_score FROM user_scores s WHERE s.user_id = u.id) l"
+  true_blast_radius:
+    - "table:user_summary.recent_score"
+  expected_verdict: "BREAKING"
+
+- id: "agent_14_adv_case_subquery"
+  category: "adversarial"
+  user_request: "Rename discount_amount to rebate_amount in discounts."
+  pipeline_queries:
+    - target_table: "discounted_orders"
+      sql: "SELECT o.order_id, CASE WHEN (SELECT sum(d.discount_amount) FROM discounts d WHERE d.order_id = o.order_id) > 10 THEN 1 ELSE 0 END AS high_discount FROM raw_orders o"
+  true_blast_radius:
+    - "table:discounted_orders.high_discount"
+  expected_verdict: "BREAKING"
+
+- id: "agent_15_adv_exists_predicate"
+  category: "adversarial"
+  user_request: "Rename user_id to account_id in user_logins."
+  pipeline_queries:
+    - target_table: "active_user_flags"
+      sql: "SELECT u.id, EXISTS(SELECT 1 FROM user_logins l WHERE l.user_id = u.id) AS is_active FROM raw_users u"
+  true_blast_radius:
+    - "table:active_user_flags.is_active"
+  expected_verdict: "BREAKING"
+
+- id: "agent_16_adv_pivot_clause"
+  category: "adversarial"
+  user_request: "Rename stock_count to quantity_on_hand in inventory."
+  pipeline_queries:
+    - target_table: "warehouse_stock"
+      sql: "SELECT product_id, warehouse_1, warehouse_2 FROM (SELECT product_id, warehouse_id, stock_count FROM inventory) PIVOT(sum(stock_count) FOR warehouse_id IN (1 AS warehouse_1, 2 AS warehouse_2))"
+  true_blast_radius:
+    - "table:warehouse_stock.warehouse_1"
+    - "table:warehouse_stock.warehouse_2"
+  expected_verdict: "BREAKING"

@@ -109,3 +109,35 @@ def test_relational_control_shift_warning():
     assert result.passed is True
     assert len(result.warnings) == 1
     assert "Relational Control Shift" in result.warnings[0]
+
+
+def test_empty_blast_with_unresolved_construct_flags_uncertainty():
+    verifier = DeterministicVerifier()
+    proposal = ChangeProposal(
+        target_table="employees",
+        target_column="manager_id",
+        change_type=ChangeType.RENAME,
+        old_value="manager_id",
+        new_value="supervisor_id",
+        sql_statement="ALTER TABLE employees RENAME COLUMN manager_id TO supervisor_id;",
+        intent_summary="Rename supervisor reference."
+    )
+    derivation_blast = set()
+    relational_blast = set()
+    table_blast = {"table:final_org.depth"}
+    unresolved_constructs = {"final_org": ["RECURSIVE_CTE"]}
+
+    result = verifier.verify(
+        proposal=proposal,
+        derivation_blast=derivation_blast,
+        relational_blast=relational_blast,
+        table_blast=table_blast,
+        unresolved_constructs=unresolved_constructs
+    )
+
+    assert result.passed is False
+    assert result.uncertain is True
+    assert len(result.issues) == 1
+    assert "UNCERTAINTY_FLAGGED" in result.issues[0]
+    assert "MANUAL_AUDIT_REQUIRED" in result.issues[0]
+

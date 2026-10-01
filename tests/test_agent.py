@@ -56,3 +56,35 @@ def test_agent_end_to_end_breaking_rename():
     assert result.verification_passed is False
     assert result.impact_report.risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]
     assert result.impact_report.recommended_action == "ABORT"
+
+
+def test_agent_end_to_end_uncertainty_handling():
+    schema = {
+        "employees": {"emp_id": "int", "manager_id": "int"}
+    }
+    queries = [
+        {
+            "target_table": "final_org",
+            "sql": """
+            WITH RECURSIVE org_chart AS (
+              SELECT emp_id, manager_id, 1 AS depth FROM employees WHERE manager_id IS NULL
+              UNION ALL
+              SELECT e.emp_id, e.manager_id, o.depth + 1 FROM employees e JOIN org_chart o ON e.manager_id = o.emp_id
+            )
+            SELECT emp_id, depth FROM org_chart
+            """
+        }
+    ]
+    agent = AutonomousDataAgent(schema=schema, queries=queries, sniffer_mode="extended")
+
+    result = agent.execute_change_request(
+        user_request="Rename manager_id in employees to supervisor_id.",
+        schema_yaml_str="employees:\n  emp_id: int\n  manager_id: int"
+    )
+
+    assert result.proposal.target_table == "employees"
+    assert result.proposal.target_column == "manager_id"
+    assert result.verification_uncertain is True
+    assert result.impact_report.recommended_action == "MANUAL_AUDIT_REQUIRED"
+    assert result.impact_report.risk_level == RiskLevel.HIGH
+

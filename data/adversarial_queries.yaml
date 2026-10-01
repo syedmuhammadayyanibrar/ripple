@@ -43,3 +43,34 @@
   target_change: "table:employees.manager_id"
   expected_blast_radius:
     - "table:final_org.depth"
+
+- id: "adv_05_lateral_subquery"
+  difficulty: "hard"
+  description: "Cross-join lateral subquery fetching user recent score"
+  queries:
+    - target_table: "user_summary"
+      sql: "SELECT u.id, l.recent_score FROM raw_users u, LATERAL (SELECT score AS recent_score FROM user_scores s WHERE s.user_id = u.id) l"
+  target_change: "table:user_scores.score"
+  expected_blast_radius:
+    - "table:user_summary.recent_score"
+
+- id: "adv_06_case_scalar_subquery"
+  difficulty: "hard"
+  description: "Conditional CASE with scalar subquery computing discount applicability"
+  queries:
+    - target_table: "discounted_orders"
+      sql: "SELECT o.order_id, CASE WHEN (SELECT sum(d.discount_amount) FROM discounts d WHERE d.order_id = o.order_id) > 10 THEN 1 ELSE 0 END AS high_discount FROM raw_orders o"
+  target_change: "table:discounts.discount_amount"
+  expected_blast_radius:
+    - "table:discounted_orders.high_discount"
+
+- id: "adv_07_exists_subquery_predicate"
+  difficulty: "hard"
+  description: "Subquery expression inside EXISTS check for active user status"
+  queries:
+    - target_table: "active_user_flags"
+      sql: "SELECT u.id, EXISTS(SELECT 1 FROM user_logins l WHERE l.user_id = u.id) AS is_active FROM raw_users u"
+  target_change: "table:user_logins.user_id"
+  expected_blast_radius:
+    - "table:active_user_flags.is_active"
+

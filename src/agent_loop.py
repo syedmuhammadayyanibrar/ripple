@@ -31,9 +31,14 @@ class AutonomousDataAgent:
     Ripple lineage analysis, deterministic rule verification, and audited impact reporting.
     """
 
-    def __init__(self, schema: Dict[str, Any], queries: List[Dict[str, str]] | None = None):
+    def __init__(
+        self, 
+        schema: Dict[str, Any], 
+        queries: List[Dict[str, str]] | None = None,
+        sniffer_mode: str = "extended"
+    ):
         self.schema = schema
-        self.lineage_engine = LineageEngine(schema=schema)
+        self.lineage_engine = LineageEngine(schema=schema, sniffer_mode=sniffer_mode)
         self.table_baseline = TableBaseline(schema=schema)
         self.verifier = DeterministicVerifier(schema=schema)
 

@@ -2,15 +2,20 @@
 
 Ripple is a column-level SQL lineage engine and autonomous agent verification platform designed to evaluate and prevent breaking data-model changes across multi-table analytical pipelines.
 
+---
+
 ## 🎯 Research Questions
-1. **Core Lineage**: How accurately can column-level lineage predict the true downstream blast radius of a data-model change compared to coarse table-level baselines?
-2. **Autonomous Agent Trust**: When an autonomous agent proposes a data-model change, how often does its self-reported impact assessment match the true blast radius — and does its reliability degrade when the underlying lineage engine fails on complex SQL constructs?
+
+1. **Core Lineage Precision vs Table-Level Baseline**: How accurately can column-level lineage predict the true downstream blast radius of a schema change compared to coarse table-level baselines across standard and adversarial SQL pipelines?
+2. **Autonomous Agent Trust & Failure Modes**: When an autonomous data engineering agent proposes a migration, how often does its self-reported impact assessment match the true blast radius — and does that reliability degrade when the underlying lineage engine fails on complex SQL constructs?
+3. **The Generalization Boundary of Uncertainty Detection**: Can rule-based syntactic construct sniffing eliminate false-confidence outages across unseen unresolvable SQL constructs, or is it fundamentally bounded as an enumerative heuristic?
 
 ---
 
 ## 📊 Empirical Findings
 
-### 1. Lineage Engine Benchmark (Generalization Set: 8 Pipelines)
+### 1. Core Lineage Benchmark: Standard Pipelines (8 Generalization Test Cases)
+
 Evaluated across easy, medium, and hard multi-table analytical pipelines:
 
 | Metric | Column-Level Lineage (Ripple) | Table-Level Baseline | Impact / Difference |
@@ -20,22 +25,66 @@ Evaluated across easy, medium, and hard multi-table analytical pipelines:
 | **Macro-Avg F1 Score** | **1.000** | 0.596 | **+67.8% F1 improvement** |
 | **Blast-Radius Inflation** | **1.00x** | **2.42x** | Table baseline over-flags damage by 242% |
 
-### 2. Autonomous Agent Trust Benchmark (8 Change Requests)
-Comparing binary agent verifiers against Ripple's **Ternary Uncertainty Verifier**:
+On standard SQL (CTEs, joins, aggregations, wildcards), column-level lineage pinpoints the exact downstream impact without flagging unrelated columns in downstream tables.
 
-| Metric | Binary Verifier (Baseline) | Ternary Verifier (Ripple) | Impact / Safety |
+---
+
+### 2. Core Lineage Benchmark: Adversarial Pipelines (7 Hard Test Cases)
+
+When tested against complex SQL constructs designed to stress AST traversal:
+
+| Metric | Column-Level Lineage (Ripple) | Table-Level Baseline | Analysis |
 | :--- | :--- | :--- | :--- |
-| **Standard SQL Reliability** | 100.0% | 100.0% | Exact matching on standard SQL |
-| **False Confidence Failure Rate** | **25.0%** | **0.0%** | **100% elimination of silent breaking changes** |
-| **Overall Safe Decision Rate** | 62.5% | **75.0%** | Catches unresolvable ASTs before deployment |
-| **Uncertainty Audits Flagged** | 0 | 1 | Transparently surfaces recursive CTE risks |
+| **Macro-Avg Precision** | 21.4% | **50.0%** | Column lineage drops edges on complex AST subqueries |
+| **Macro-Avg Recall** | 28.6% (2/7 resolved) | **100.0%** (7/7 identified) | Table baseline catches downstream tables, column engine misses |
+| **Macro-Avg F1 Score** | 0.238 | **0.667** | Table baseline is more robust under AST failures |
+| **Blast-Radius Inflation** | 0.71x (under-predicts) | 2.00x (over-predicts) | **Lineage suffers hazardous silent under-prediction** |
 
-### Key Discovery: The Silent Lineage Failure Trap & The Ternary Fix
-- **The Vulnerability**: When an underlying AST engine fails silently on complex constructs (e.g., recursive CTEs), it returns an empty blast radius (`set()`). Binary verifiers equate `0` with safety, causing the agent to issue a `LOW RISK` / `PROCEED` recommendation on a breaking change.
-- **The Ternary Solution**: Ripple implements ternary verification:
-  1. `SAFE` (0 blast radius, fully resolvable AST) $\to$ `PROCEED`
-  2. `BREAKING` ($>0$ blast radius) $\to$ `ABORT`
-  3. `UNCERTAIN` (0 blast radius, unresolvable construct detected) $\to$ `MANUAL_AUDIT_REQUIRED`
+#### Construct-by-Construct Breakdown
+1. **Window Functions (`OVER (PARTITION BY ... ORDER BY ...)`)**: Fully resolved (F1: 1.00, Inflation: 1.00x).
+2. **Set Operations (`UNION ALL`)**: Lineage maps column to both branch projections (F1: 0.00, Noisy Over-prediction).
+3. **Correlated Subqueries**: Scalar subquery traces to synthetic projection AST (F1: 0.00, Noisy Over-prediction).
+4. **Conditional Subqueries (`CASE WHEN (SELECT ...)`)**: Traces to projection alias + synthetic node (F1: 0.67, Noisy Over-prediction).
+5. **Recursive CTEs (`WITH RECURSIVE`)**: **Silent Drop** — returns 0 columns (F1: 0.00, Under-prediction).
+6. **Lateral Subqueries (`CROSS JOIN LATERAL (...)`)**: **Silent Drop** — returns 0 columns (F1: 0.00, Under-prediction).
+7. **Exists Predicates (`EXISTS(SELECT ...)`)**: **Silent Drop** — returns 0 columns (F1: 0.00, Under-prediction).
+
+---
+
+### 3. Autonomous Agent Trust Benchmark (16 Scenarios: 8 Standard, 8 Adversarial)
+
+To test how an autonomous agent (e.g. Alkera AI pattern) behaves when its lineage engine fails, we evaluated 16 real change requests across three verifier architectures:
+
+| Verifier Architecture | False Confidence (Hazardous) | Uncertain Audits Flagged | Adversarial Safe Decisions | Standard SQL Reliability |
+| :--- | :--- | :--- | :--- | :--- |
+| **Binary Verifier (Baseline)** | **3 of 16 (18.8%)** | 0 of 16 (0.0%) | 5 of 8 (62.5%) | **8 of 8 (100.0%)** |
+| **Targeted Ternary (Seen Only)** | **2 of 16 (12.5%)** | 1 of 16 (6.2%) | 6 of 8 (75.0%) | **8 of 8 (100.0%)** |
+| **Extended Ternary (Seen + Unseen)** | **0 of 16 (0.0%)** | 3 of 16 (18.8%) | **8 of 8 (100.0%)** | **8 of 8 (100.0%)** |
+
+> [!IMPORTANT]
+> **Reporting Precision on Small Samples**: In an evaluation suite of 16 cases, every single failure represents a 6.25% shift. We report exact fractions ($N/\text{total}$) alongside percentages to avoid the illusion of statistical precision.
+
+---
+
+### 4. Key Discovery: The "Silent Lineage Failure Trap" & Failure Taxonomy
+
+Our empirical benchmark reveals a non-obvious, critical vulnerability in lineage-driven autonomous agents:
+
+#### The Vulnerability
+When an AST lineage parser encounters an unresolvable SQL construct (such as a recursive CTE or lateral join), it does **not** throw an exception. Instead, it silently returns an empty set of downstream columns (`set()`). 
+A standard binary verifier assumes:
+$$\text{len}(\text{blast\_radius}) = 0 \implies \text{Safe to Proceed}$$
+This creates a **catastrophic false-confidence outage**: the agent reports `LOW RISK` and issues a `PROCEED` recommendation on a change that will actually break production downstream.
+
+#### Two Distinct Failure Modes in Adversarial SQL
+It is critical to distinguish between two fundamentally different failure modes:
+1. **Silent Under-prediction (Hazardous False Confidence)**: The engine returns 0 columns when downstream breakage exists (`agent_06` recursive CTE, `agent_13` lateral subquery, `agent_15` exists predicate). The agent falsely greenlights a breaking change.
+2. **Noisy Over-prediction (Cautious False Alarm)**: The engine returns more columns than the true blast radius due to synthetic AST nodes (`agent_05` union, `agent_07` correlated subquery, `agent_14` case subquery, `agent_16` pivot). Here the agent flags `CRITICAL RISK` and halts execution (`ABORT`). While imprecise, this failure is **safe** from silent production outages.
+
+#### The Generalization Boundary (Seen vs. Unseen Constructs)
+- When we first implemented the ternary state detector, it targeted the constructs we had observed failing: `exp.Union` and recursive CTEs. On our initial 8-case suite, it achieved 0/8 false confidence.
+- However, when evaluated on **unseen unresolvable constructs** (`LATERAL` joins and `EXISTS` subqueries), the targeted detector failed to flag uncertainty on **2 of 8 adversarial cases** (`agent_13` and `agent_15`), allowing silent false confidence to return.
+- **Architectural Conclusion**: Syntactic construct sniffing is an enumerative heuristic (whack-a-mole). While extending the sniffer to cover lateral subqueries and exists predicates caught those specific cases (reducing false confidence to 0/16 in our benchmark), a production autonomous agent cannot rely solely on syntax blacklists. True reliability requires **structural graph-completeness audits**: if a source table appears in a query's AST, but 0 columns are traced downstream, the verifier must surface an uncertainty flag before deployment.
 
 ---
 
@@ -53,14 +102,14 @@ Ripple operates as an end-to-end agentic platform:
            │ Structured ChangeProposal
            ▼
 ┌─────────────────────────┐
-│  Ripple Lineage Engine  │  ──> Column-Level & Relational Graphs
-└──────────┬──────────────┘  ──> AST Construct Sniffer (Unresolvable flag)
-           │ Blast Radiuses + Construct Risks
+│  Ripple Lineage Engine  │  ──> Derivation Graph (G_val) & Relational Graph (G_rel)
+└──────────┬──────────────┘  ──> AST Construct Sniffer (Unresolvable Flags)
+           │ Column & Relational Blast Radiuses
            ▼
 ┌─────────────────────────┐
-│  Deterministic Verifier │  <── Rule-based ternary checks (SAFE, BREAKING, UNCERTAIN)
+│  Deterministic Verifier │  <── Ternary Logic (SAFE, BREAKING, UNCERTAIN)
 └──────────┬──────────────┘
-           │ Verification Results
+           │ Audited Verdict & Issues
            ▼
 ┌─────────────────────────┐
 │   Impact Report Agent   │  ──> Audited ImpactReport (Risk & Recommendation)
@@ -68,19 +117,19 @@ Ripple operates as an end-to-end agentic platform:
 ```
 
 1. **Structured Change Proposal (`src/agent.py`)**:
-   - Converts natural language requests into typed `ChangeProposal` objects with schema catalog grounding.
-   - Enforces structured JSON output (`response_schema`).
-
-2. **Deterministic Verification Layer (`src/verifier.py`)**:
-   - Hardcoded rule checks independent of LLM reasoning:
-     - `DESTRUCTIVE_DROP_CHECK`: Blocks dropping columns with downstream dependencies.
-     - `RENAME_PROPAGATION_CHECK`: Identifies unmigrated downstream references.
-     - `TYPE_COMPATIBILITY_CHECK`: Prevents invalid numeric-to-string conversions impacting downstream arithmetic.
-     - `RELATIONAL_CONTROL_SHIFT`: Surfaces predicate, join, and group-by shifts.
-     - `EMPTY_BLAST_UNCERTAINTY_GUARD`: Blocks `PROCEED` if query contains unresolvable constructs.
-
-3. **Autonomous Agent Loop (`src/agent_loop.py`)**:
-   - Orchestrates LLM proposal generation, Ripple lineage computation, deterministic verification, and impact reporting.
+   - Converts natural-language requests into typed Pydantic `ChangeProposal` models grounded in the schema catalog.
+2. **Dual-Graph Lineage Engine (`src/lineage_engine.py`)**:
+   - Derivation Graph ($G_{val}$): Tracks direct column value transformations.
+   - Relational Influence Graph ($G_{rel}$): Tracks row filtering, predicates, join conditions, and grouping shifts.
+   - Sniffer Subsystem: Analyzes AST expressions for known resolution limits (`sniffer_mode`: `none`, `targeted`, `extended`).
+3. **Deterministic Verification Layer (`src/verifier.py`)**:
+   - Implements rule-based ternary checks independent of LLM hallucination:
+     - `SAFE`: Zero blast radius and verified resolvable AST $\to$ `PROCEED`.
+     - `BREAKING`: Non-zero downstream dependencies $\to$ `ABORT`.
+     - `UNCERTAIN`: Zero blast radius with unresolvable AST construct $\to$ `MANUAL_AUDIT_REQUIRED`.
+     - `RELATIONAL_WARNING`: Preserves predicate and join control flow shifts.
+4. **Autonomous Agent Loop (`src/agent_loop.py`)**:
+   - Coordinates proposal generation, lineage computation, deterministic checks, and structured report synthesis.
 
 ---
 
@@ -90,34 +139,34 @@ Ripple operates as an end-to-end agentic platform:
 ripple/
 ├── src/
 │   ├── __init__.py
-│   ├── agent.py               # Propose-change and impact-report generation
-│   ├── agent_loop.py          # End-to-end autonomous agent loop orchestrator
-│   ├── lineage_engine.py      # Column-level derivation & relational-influence engine
-│   ├── table_baseline.py      # Coarse table-level lineage baseline
-│   ├── verifier.py            # Deterministic rule-based verification engine
-│   └── metrics.py             # Precision, Recall, F1, Inflation calculator
+│   ├── agent.py               # Pydantic models, LLM call, and structured proposal parsing
+│   ├── agent_loop.py          # Autonomous agent orchestrator
+│   ├── lineage_engine.py      # Dual-graph column & relational lineage engine
+│   ├── table_baseline.py      # Coarse table-level baseline comparison engine
+│   ├── verifier.py            # Deterministic rule-based ternary verifier
+│   └── metrics.py             # Precision, Recall, F1, and Inflation metrics
 ├── tests/
 │   ├── __init__.py
-│   ├── test_agent.py          # End-to-end agent loop tests
-│   ├── test_lineage_engine.py # Unit tests for lineage engine
+│   ├── test_agent.py          # End-to-end agent loop & uncertainty handling tests
+│   ├── test_lineage_engine.py # Unit tests for lineage traversal & sniffer modes
 │   ├── test_metrics.py        # Unit tests for scoring logic
 │   ├── test_table_baseline.py # Unit tests for table baseline
-│   └── test_verifier.py       # Unit tests for deterministic checks
+│   └── test_verifier.py       # Unit tests for ternary verification checks
 ├── data/
-│   ├── schema.yaml            # Data warehouse catalog definitions
+│   ├── schema.yaml            # E-commerce warehouse catalog schema
 │   ├── dev_queries.yaml       # 10 development benchmark queries
 │   ├── test_queries.yaml      # 8 held-out test benchmark queries
-│   ├── adversarial_queries.yaml # 4 adversarial stress test queries
-│   └── agent_eval_cases.yaml  # 8 autonomous agent evaluation scenarios
+│   ├── adversarial_queries.yaml # 7 hard adversarial stress test queries
+│   └── agent_eval_cases.yaml  # 16 autonomous agent evaluation scenarios
 ├── evaluate.py                # Lineage engine benchmark runner
-├── evaluate_agent.py          # Autonomous agent reliability benchmark runner
+├── evaluate_agent.py          # Agent reliability & generalization ablation runner
 ├── requirements.txt           # Project dependencies
 └── README.md
 ```
 
 ---
 
-## 🚀 Quickstart
+## 🚀 Quickstart & Verification
 
 ### 1. Installation
 ```bash
@@ -129,17 +178,22 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Run Test Suite (15 Passing Tests)
+### 2. Run Test Suite (18 Passing Tests)
 ```bash
 pytest
 ```
 
-### 3. Run Benchmarks
+### 3. Run Core Lineage Benchmarks
 ```bash
-# Run core lineage engine benchmarks
+# Standard held-out test queries (8 queries)
 python evaluate.py --dataset data/test_queries.yaml
-python evaluate.py --dataset data/adversarial_queries.yaml
 
-# Run autonomous agent reliability benchmark
+# Adversarial SQL queries (7 queries)
+python evaluate.py --dataset data/adversarial_queries.yaml
+```
+
+### 4. Run Agent Reliability & Generalization Ablation Benchmark
+```bash
+# Evaluates all 16 scenarios across Binary, Targeted Ternary, and Extended Ternary modes
 python evaluate_agent.py
 ```

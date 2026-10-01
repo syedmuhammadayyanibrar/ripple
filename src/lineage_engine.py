@@ -12,11 +12,19 @@ class LineageEngine:
     - Relational-Influence Graph (G_rel): Predicate, join, and grouping control flow.
     """
 
-    def __init__(self, schema: dict | None = None):
+    def __init__(self, schema: dict | None = None, sniffer_mode: str = "extended"):
+        """
+        Initializes the lineage engine.
+        sniffer_mode options:
+          - 'none': Disables construct detection (baseline binary behavior).
+          - 'targeted': Detects only the initial failure modes (exp.Union, RECURSIVE_CTE).
+          - 'extended': Detects unseen complex constructs (LATERAL subqueries, EXISTS predicates).
+        """
         self.schema = dict(schema) if schema else {}
         self.graph = nx.DiGraph()
         self.influence_graph = nx.DiGraph()
         self.unresolved_constructs: Dict[str, List[str]] = {}
+        self.sniffer_mode = sniffer_mode
 
     def _get_node_id(self, node, target_table: str) -> str:
         """Resolves canonical node identities, unmasking query table aliases."""
@@ -46,7 +54,10 @@ class LineageEngine:
             self._add_lineage_node(child, target_table)
 
     def _detect_unresolved_constructs(self, parsed: exp.Expression) -> List[str]:
-        """Detects SQL constructs where AST lineage parsers are known to silently fail."""
+        """Detects SQL constructs where AST lineage parsers are known to silently fail or drop column edges."""
+        if self.sniffer_mode == "none":
+            return []
+
         issues = []
         if isinstance(parsed, exp.Union):
             issues.append("SET_OPERATION_UNION")
@@ -55,7 +66,17 @@ class LineageEngine:
         if with_node and (with_node.args.get("recursive") or "recursive" in with_node.sql().lower()):
             issues.append("RECURSIVE_CTE")
 
+        if self.sniffer_mode == "targeted":
+            return issues
+
+        if parsed.find(exp.Lateral) or "lateral" in parsed.sql().lower():
+            issues.append("LATERAL_SUBQUERY")
+
+        if parsed.find(exp.Exists):
+            issues.append("EXISTS_PREDICATE")
+
         return issues
+
 
     def add_query(self, sql: str, target_table: str):
         """Parses a query, records AST risks, and constructs lineage graphs."""
