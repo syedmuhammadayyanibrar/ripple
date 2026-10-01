@@ -1,10 +1,13 @@
-from typing import Set, Dict, Any, List
+from typing import Set, Dict, Any, List, Optional
 from src.agent import ChangeProposal, ChangeType
 
 
 class VerificationResult:
+    """Holds verification outcome: pass/fail status, uncertainty flags, issues, and warnings."""
+
     def __init__(self):
         self.passed: bool = True
+        self.uncertain: bool = False
         self.issues: List[str] = []
         self.warnings: List[str] = []
         self.details: Dict[str, Any] = {}
@@ -13,12 +16,18 @@ class VerificationResult:
         self.passed = False
         self.issues.append(issue)
 
+    def add_uncertainty(self, reason: str):
+        self.uncertain = True
+        self.passed = False
+        self.issues.append(f"UNCERTAINTY_FLAGGED: {reason}")
+
     def add_warning(self, warning: str):
         self.warnings.append(warning)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "passed": self.passed,
+            "uncertain": self.uncertain,
             "issues": self.issues,
             "warnings": self.warnings,
             "details": self.details,
@@ -26,6 +35,11 @@ class VerificationResult:
 
 
 class DeterministicVerifier:
+    """
+    Rule-based verification engine enforcing safety constraints on top of graph blast radiuses.
+    Implements ternary verification states: PASS (Safe), FAIL (Breaking), and UNCERTAIN (Audit Required).
+    """
+
     def __init__(self, schema: Dict[str, Any] | None = None):
         self.schema = schema or {}
 
@@ -35,12 +49,23 @@ class DeterministicVerifier:
         derivation_blast: Set[str],
         relational_blast: Set[str],
         table_blast: Set[str],
+        unresolved_constructs: Optional[Dict[str, List[str]]] = None,
     ) -> VerificationResult:
         result = VerificationResult()
+        unresolved = unresolved_constructs or {}
         
         result.details["derivation_count"] = len(derivation_blast)
         result.details["relational_count"] = len(relational_blast)
         result.details["table_count"] = len(table_blast)
+
+        if len(derivation_blast) == 0 and unresolved:
+            construct_list = [f"{tbl}: {', '.join(c)}" for tbl, c in unresolved.items()]
+            result.add_uncertainty(
+                f"Absence of detected blast radius cannot be certified as safe. "
+                f"Pipeline contains complex constructs with known lineage resolution limitations: {construct_list}. "
+                f"MANUAL_AUDIT_REQUIRED."
+            )
+            return result
 
         if proposal.change_type == ChangeType.DROP:
             if len(derivation_blast) > 0:

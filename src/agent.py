@@ -23,6 +23,7 @@ class RiskLevel(str, Enum):
 
 
 class ChangeProposal(BaseModel):
+    """Structured proposal representing a planned data-model change."""
     target_table: str = Field(description="Table name being modified.")
     target_column: str = Field(description="Column name being modified, renamed, or dropped.")
     change_type: ChangeType = Field(description="Type of data model change.")
@@ -33,13 +34,14 @@ class ChangeProposal(BaseModel):
 
 
 class ImpactReport(BaseModel):
+    """Audited impact report detailing blast radiuses, verification findings, and recommendations."""
     summary: str = Field(description="High-level summary of the proposed change and its consequences.")
     risk_level: RiskLevel = Field(description="Overall risk level assessment.")
     derivation_blast_radius: List[str] = Field(description="Downstream columns whose values are directly affected.")
     table_baseline_blast_radius: List[str] = Field(description="Downstream columns flagged by coarse table-level lineage.")
     verification_passed: bool = Field(description="Whether all deterministic verification checks passed.")
     verification_issues: List[str] = Field(description="List of detected verification failures or warnings.")
-    recommended_action: str = Field(description="Recommended action: PROCEED, PROCEED_WITH_MIGRATION, or ABORT.")
+    recommended_action: str = Field(description="Recommended action: PROCEED, PROCEED_WITH_MIGRATION, ABORT, or MANUAL_AUDIT_REQUIRED.")
 
 
 def propose_change(
@@ -48,6 +50,7 @@ def propose_change(
     model: str = "gemini-2.5-flash",
     client: Optional[genai.Client] = None
 ) -> ChangeProposal:
+    """Translates a natural-language request into a typed ChangeProposal using Gemini with schema enforcement."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not client:
         if not api_key:
@@ -88,6 +91,7 @@ def generate_impact_report(
     model: str = "gemini-2.5-flash",
     client: Optional[genai.Client] = None
 ) -> ImpactReport:
+    """Generates an audited impact report synthesizing lineage traversal and verification rule outcomes."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not client:
         if not api_key:
@@ -110,9 +114,11 @@ LINEAGE IMPACT:
 
 DETERMINISTIC VERIFICATION CHECKS:
 - Passed: {verification_results.get('passed', True)}
+- Uncertain: {verification_results.get('uncertain', False)}
 - Issues Found: {verification_results.get('issues', [])}
 
 Produce a formal, transparent ImpactReport. Never hide verification failures or claim a breaking change is safe.
+If verification is uncertain due to complex unresolvable constructs, recommend MANUAL_AUDIT_REQUIRED with HIGH risk.
 """
 
     response = client.models.generate_content(
@@ -171,6 +177,16 @@ def _mock_propose_change(user_request: str, schema_yaml: str) -> ChangeProposal:
             sql_statement="UPDATE raw_orders SET status = lower(status);",
             intent_summary="Normalize status casing."
         )
+    elif "amount" in req_lower and "orders_eu" in req_lower:
+        return ChangeProposal(
+            target_table="orders_eu",
+            target_column="amount",
+            change_type=ChangeType.RENAME,
+            old_value="amount",
+            new_value="euro_amount",
+            sql_statement="ALTER TABLE orders_eu RENAME COLUMN amount TO euro_amount;",
+            intent_summary="Rename amount to euro_amount."
+        )
     elif "amount" in req_lower:
         return ChangeProposal(
             target_table="raw_orders",
@@ -211,8 +227,12 @@ def _mock_generate_impact_report(
 ) -> ImpactReport:
     issues = verification_results.get("issues", [])
     passed = verification_results.get("passed", True)
+    uncertain = verification_results.get("uncertain", False)
 
-    if not passed or len(derivation_blast) > 2:
+    if uncertain:
+        risk = RiskLevel.HIGH
+        action = "MANUAL_AUDIT_REQUIRED"
+    elif not passed or len(derivation_blast) > 2:
         risk = RiskLevel.CRITICAL if not passed else RiskLevel.HIGH
         action = "ABORT" if not passed else "PROCEED_WITH_MIGRATION"
     elif len(derivation_blast) > 0:

@@ -2,15 +2,24 @@ import networkx as nx
 import sqlglot
 from sqlglot import exp
 from sqlglot.lineage import lineage
+from typing import Dict, Any, List, Set, Optional
 
 
 class LineageEngine:
+    """
+    Column-level SQL lineage engine providing dual-graph separation:
+    - Derivation Graph (G_val): Value-level data transformations.
+    - Relational-Influence Graph (G_rel): Predicate, join, and grouping control flow.
+    """
+
     def __init__(self, schema: dict | None = None):
         self.schema = dict(schema) if schema else {}
         self.graph = nx.DiGraph()
         self.influence_graph = nx.DiGraph()
+        self.unresolved_constructs: Dict[str, List[str]] = {}
 
     def _get_node_id(self, node, target_table: str) -> str:
+        """Resolves canonical node identities, unmasking query table aliases."""
         if isinstance(node.source, exp.Table):
             real_table = (
                 getattr(node.source, "name", None)
@@ -28,6 +37,7 @@ class LineageEngine:
         return f"table:{target_table}.{col_name}"
 
     def _add_lineage_node(self, node, target_table: str):
+        """Recursively traverses the sqlglot lineage tree and inserts directed edges."""
         parent_id = self._get_node_id(node, target_table)
 
         for child in node.downstream:
@@ -35,10 +45,28 @@ class LineageEngine:
             self.graph.add_edge(child_id, parent_id)
             self._add_lineage_node(child, target_table)
 
+    def _detect_unresolved_constructs(self, parsed: exp.Expression) -> List[str]:
+        """Detects SQL constructs where AST lineage parsers are known to silently fail."""
+        issues = []
+        if isinstance(parsed, exp.Union):
+            issues.append("SET_OPERATION_UNION")
+
+        with_node = parsed.args.get("with_")
+        if with_node and (with_node.args.get("recursive") or "recursive" in with_node.sql().lower()):
+            issues.append("RECURSIVE_CTE")
+
+        return issues
+
     def add_query(self, sql: str, target_table: str):
+        """Parses a query, records AST risks, and constructs lineage graphs."""
         from sqlglot.optimizer import qualify
 
         parsed = sqlglot.parse_one(sql)
+        
+        detected_risks = self._detect_unresolved_constructs(parsed)
+        if detected_risks:
+            self.unresolved_constructs[target_table] = detected_risks
+
         cte_names = {cte.alias for cte in parsed.find_all(exp.CTE)}
         query_tables = {
             t.name for t in parsed.find_all(exp.Table) if t.name not in cte_names
@@ -105,6 +133,7 @@ class LineageEngine:
         extract_influence_cols(parsed.args.get("having"), "having")
 
     def get_blast_radius(self, target: str, include_ctes: bool = False) -> set[str]:
+        """Computes derivation blast radius via directed graph traversal."""
         if not target.startswith(("table:", "cte:")):
             target = f"table:{target}"
 
@@ -122,6 +151,7 @@ class LineageEngine:
         return self.get_blast_radius(target, include_ctes)
 
     def get_relational_blast_radius(self, target: str) -> set[str]:
+        """Computes downstream relations influenced by filtering, joins, or aggregations."""
         if not target.startswith(("table:", "relation:")):
             target = f"table:{target}"
 

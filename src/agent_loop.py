@@ -12,18 +12,25 @@ from src.table_baseline import TableBaseline
 
 
 class AgentExecutionResult(BaseModel):
+    """Complete execution record of the autonomous data engineering agent."""
     user_request: str
     proposal: ChangeProposal
     derivation_blast: List[str]
     relational_blast: List[str]
     table_blast: List[str]
     verification_passed: bool
+    verification_uncertain: bool = False
     verification_issues: List[str]
     verification_warnings: List[str]
     impact_report: ImpactReport
 
 
 class AutonomousDataAgent:
+    """
+    Autonomous agent orchestrator connecting structured LLM change proposals,
+    Ripple lineage analysis, deterministic rule verification, and audited impact reporting.
+    """
+
     def __init__(self, schema: Dict[str, Any], queries: List[Dict[str, str]] | None = None):
         self.schema = schema
         self.lineage_engine = LineageEngine(schema=schema)
@@ -54,6 +61,7 @@ class AutonomousDataAgent:
             derivation_blast=derivation_set,
             relational_blast=relational_set,
             table_blast=table_set,
+            unresolved_constructs=self.lineage_engine.unresolved_constructs,
         )
 
         derivation_list = sorted(list(derivation_set))
@@ -74,6 +82,7 @@ class AutonomousDataAgent:
             relational_blast=sorted(list(relational_set)),
             table_blast=table_list,
             verification_passed=v_result.passed,
+            verification_uncertain=v_result.uncertain,
             verification_issues=v_result.issues,
             verification_warnings=v_result.warnings,
             impact_report=report,
