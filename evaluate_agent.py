@@ -151,6 +151,8 @@ def run_agent_evaluation(
     print("1. Circularity Proof: 'Targeted Ternary' eliminates false confidence on seen constructs, but fails on 2/8 unseen constructs.")
     print("2. Raw Counts: Small suites are reported as exact fractions (N/total) alongside percentages to prevent false precision.")
     print("3. Failure Taxonomy: Hazardous false-confidence (under-prediction) is separated from cautious false-alarms (over-prediction).")
+    print("4. Scope Distinction: 7 raw SQL queries in lineage benchmark vs 16 end-to-end agent change scenarios (8 std, 8 adv).")
+    print("5. Proposed Future Work: Structural graph-completeness invariant (out_degree(T_source)==0 -> UNCERTAIN) to replace AST blacklists.")
     print(f"{'='*115}\n")
 
 

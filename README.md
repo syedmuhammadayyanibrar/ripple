@@ -53,7 +53,10 @@ When tested against complex SQL constructs designed to stress AST traversal:
 
 ### 3. Autonomous Agent Trust Benchmark (16 Scenarios: 8 Standard, 8 Adversarial)
 
-To test how an autonomous agent (e.g. Alkera AI pattern) behaves when its lineage engine fails, we evaluated 16 real change requests across three verifier architectures:
+To test how an autonomous agent (e.g. Alkera AI pattern) behaves when its lineage engine fails, we evaluated 16 end-to-end change requests across three verifier architectures:
+
+> [!NOTE]
+> **Dataset Scope Distinction**: Section 2 tests **7 isolated adversarial SQL queries** directly against the core lineage engine (`data/adversarial_queries.yaml`). Section 3 evaluates **16 end-to-end agent change requests** (`data/agent_eval_cases.yaml`), consisting of 8 standard migrations and 8 adversarial stress scenarios (the 7 constructs evaluated in Section 2 plus an 8th end-to-end scenario, `agent_16_adv_pivot_clause`, testing dynamic table pivot migrations).
 
 | Verifier Architecture | False Confidence (Hazardous) | Uncertain Audits Flagged | Adversarial Safe Decisions | Standard SQL Reliability |
 | :--- | :--- | :--- | :--- | :--- |
@@ -84,7 +87,16 @@ It is critical to distinguish between two fundamentally different failure modes:
 #### The Generalization Boundary (Seen vs. Unseen Constructs)
 - When we first implemented the ternary state detector, it targeted the constructs we had observed failing: `exp.Union` and recursive CTEs. On our initial 8-case suite, it achieved 0/8 false confidence.
 - However, when evaluated on **unseen unresolvable constructs** (`LATERAL` joins and `EXISTS` subqueries), the targeted detector failed to flag uncertainty on **2 of 8 adversarial cases** (`agent_13` and `agent_15`), allowing silent false confidence to return.
-- **Architectural Conclusion**: Syntactic construct sniffing is an enumerative heuristic (whack-a-mole). While extending the sniffer to cover lateral subqueries and exists predicates caught those specific cases (reducing false confidence to 0/16 in our benchmark), a production autonomous agent cannot rely solely on syntax blacklists. True reliability requires **structural graph-completeness audits**: if a source table appears in a query's AST, but 0 columns are traced downstream, the verifier must surface an uncertainty flag before deployment.
+- **Architectural Conclusion**: Syntactic construct sniffing is an enumerative heuristic (whack-a-mole). While extending the sniffer to cover lateral subqueries and exists predicates caught those specific cases (reducing false confidence to 0/16 in our benchmark), a production autonomous agent cannot rely solely on syntax blacklists.
+
+---
+
+### 5. Architectural Roadmap & Future Work (Proposed Direction)
+
+> [!TIP]
+> **Proposed Next Step (Not Yet Implemented)**: Rather than continuing to enumerate syntax patterns in the AST sniffer, the next architectural milestone for Ripple is to implement a structural graph-completeness invariant directly at the engine level:
+> $$\text{If } T_{\text{source}} \in \text{AST.SourceTables} \land \text{out\_degree}(T_{\text{source}}, G_{\text{val}}) = 0 \implies \text{Flag UNCERTAIN\_MANUAL\_AUDIT}$$
+> If a source table appears in a query's AST, but 0 columns from that table are traced to output columns in $G_{\text{val}}$, the engine treats the column lineage as structurally unverified rather than safe. This will replace enumerative syntactic heuristics with a formal, dialect-agnostic graph-theoretic completeness guarantee.
 
 ---
 
